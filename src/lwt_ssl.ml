@@ -166,7 +166,10 @@ let ssl_shutdown (fd, s) =
     Plain -> Lwt.return_unit
   | SSL s -> repeat_call fd (fun () -> Ssl.shutdown s)
 
-let shutdown (fd, _) cmd = Lwt_unix.shutdown fd cmd
+let shutdown (fd, _) cmd = 
+  try Lwt_unix.shutdown fd cmd
+  with 
+  | Unix.Unix_error (Unix.ENOTCONN, _, _) -> ()
 
 let close_notify = function
   | (_, Plain) as s ->
