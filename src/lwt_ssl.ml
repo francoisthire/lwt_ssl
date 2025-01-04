@@ -167,13 +167,22 @@ let ssl_shutdown (fd, s) =
   | SSL s -> repeat_call fd (fun () -> Ssl.shutdown s)
 
 let shutdown (fd, _) cmd = 
-  try Lwt_unix.shutdown fd cmd
-  with 
-  | Unix.Unix_error (Unix.ENOTCONN, _, _) -> ()
+  Lwt.finalize
+    (fun () ->
+       Lwt.catch
+         (fun () ->
+            Lwt_unix.shutdown fd cmd;
+            Lwt.return_unit)
+         (function
+           (* Occurs if the peer closes the connection first. *)
+           |  Unix.Unix_error (Unix.ENOTCONN, _, _) -> Lwt.return_unit
+           |  exn -> Lwt.reraise exn)[@ocaml.warning "-4"]) 
+    (fun () -> 
+       Lwt_unix.close fd)
 
 let close_notify = function
   | (_, Plain) as s ->
-      shutdown s Unix.SHUTDOWN_SEND;
+      shutdown s Unix.SHUTDOWN_SEND >>= fun () ->
       Lwt.return_true
   | (fd, SSL s) ->
       repeat_call fd (fun () -> Ssl.close_notify s)
@@ -184,7 +193,7 @@ let abort (fd, _) = Lwt_unix.abort fd
 
 let shutdown_and_close s =
   ssl_shutdown s >>= fun () ->
-  Lwt.wrap2 shutdown s Unix.SHUTDOWN_ALL >>= fun () ->
+  shutdown s Unix.SHUTDOWN_ALL >>= fun () ->
   close s
 
 let out_channel_of_descr ?buffer s =
